@@ -1,0 +1,385 @@
+---
+title: 'HW 1: Dallas Stars Promotion Analysis'
+author: "Parag Garg"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE, echo=TRUE}
+library(reticulate)
+use_python("/Users/Parag Garg/AppData/Local/Programs/Python/Python310")
+```
+Introduction:
+As a Dallas Stars hockey team analyst, we were assigned to analyze the performance of a St. Patrick's Day themed direct mail promotion that was sent to a sample of current fans. The promotion had three treatments - a control group, a food credit offer, and a drink offer. We have data on which fans received which offer, who responded, and their corresponding total ticket and concession revenue. The promotion cost $1,500 in total, and we need to determine which treatments were successful and provide recommendations for future campaigns.
+
+Analysis:
+To begin with, we analyzed the response rates of the different treatments. Out of the 1,500 fans who were sent the direct mail promotion, 95 fans responded to the control group, 114 fans responded to the drink offer, and 152 fans responded to the food credit offer. Based on these response rates, it appears that the food credit offer was the most successful.
+```{python include=FALSE}
+# Filtering out the warnings
+
+import warnings
+
+warnings.filterwarnings('ignore')
+```
+```{python include=FALSE}
+# Importing the required libraries
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import scipy.stats as stats
+import seaborn as sns
+```
+```{python include=FALSE}
+df = pd.read_csv('dallasStars.csv')
+```
+```{python include=FALSE}
+df.head()
+```
+
+```{python include=FALSE}
+response_table = pd.crosstab(index=df['offer'], columns=df['responded'])
+reponse_table = response_table.rename_axis(index='offer').rename_axis(columns='Responded', axis=1)
+print(response_table)
+```
+```{python include=FALSE}
+summary = df.groupby('offer').agg(
+    n=('responded', 'count'),
+    response=('responded', 'sum'),
+    Avg_ticket=('ticket', 'mean'),
+    Avg_concession=('concession', 'mean'),
+    SD_ticket=('ticket', 'std'),
+    SD_concession=('concession', 'std'),
+    Ticket_Revenue=('ticket','sum'),
+).reset_index()
+
+summary = summary.assign(Response_Rate=summary['response'] / summary['n'])
+```
+
+```{python include=FALSE}
+print(summary)
+```
+
+```{python include=FALSE}
+# Define adjustment values for each offer
+offer_adjustments = {"food": 0.3 * 10, "drink": 2, "Control": 0}
+
+# Calculate Concession_Revenue for each respondent
+df["Concession_Revenue"] = np.where(df["responded"] == 1, np.maximum(df["concession"] - 10, 0), 0)
+
+# Group by offer and sum concession revenue
+concession_revenue = df.groupby("offer")["Concession_Revenue"].sum().reset_index()
+
+# Apply offer adjustments
+for offer in offer_adjustments:
+    adj = offer_adjustments[offer]
+    concession_revenue.loc[concession_revenue["offer"] == offer, "Concession_Revenue"] = np.maximum(
+        concession_revenue.loc[concession_revenue["offer"] == offer, "Concession_Revenue"] - adj, 0
+    )
+
+# Print final concession revenue
+print(concession_revenue)
+```
+```{python include=FALSE}
+summary = summary.merge(concession_revenue, on='offer')
+```
+
+```{python include=FALSE}
+print(summary)
+```
+```{python include=FALSE}
+summary['total_revenue'] = summary['Ticket_Revenue'] + summary['Concession_Revenue']
+```
+
+```{python include=FALSE}
+print(summary)
+```
+```{python include=FALSE}
+# Calculate profit
+cost_of_offers = 1500
+summary['Total_Profit'] = summary['total_revenue'] - cost_of_offers
+```
+
+```{python include=FALSE}
+print(summary)
+```
+
+```{python echo=FALSE}
+percentage = np.round(summary['Response_Rate'] * 100, 2)
+sns.set_style("whitegrid")
+plt.figure(figsize=(8,6))
+sns.barplot(x='offer', y='Response_Rate', data=summary, palette='Blues')
+plt.xlabel('Offer Value ($)')
+plt.ylabel('Response Rate')
+plt.title('Response Rate by Offer Value')
+for i, v in enumerate(percentage):
+    plt.text(i, summary['Response_Rate'][i] + 0.01, f'{v}%', fontsize=10, ha='center')
+plt.show()
+```
+```{python include=FALSE}
+from scipy.stats import chi2_contingency
+
+# Perform the chi-square test
+stat, p, dof, expected = chi2_contingency(reponse_table)
+
+# Print the results
+print("Chi-square statistic:", stat)
+print("p-value:", p)
+print("Degrees of freedom:", dof)
+print("Expected frequencies:", expected)
+```
+
+```{python include=FALSE}
+from statsmodels.stats.proportion import proportions_ztest, proportion_confint
+
+control_successes = 95
+control_trials = 500
+treatment_successes = 114
+treatment_trials = 500
+hypo_prop = 0.2
+alpha = 0.05
+
+def two_sample_prop_test(control_successes, control_trials, treatment_successes, treatment_trials, hypo_prop, alpha=0.05):
+    # Perform the individual proportion test for the control group
+    stat, pval = proportions_ztest(count=control_successes, nobs=control_trials, value=hypo_prop)
+
+    # Calculate the confidence interval for the control group
+    ci_low, ci_high = proportion_confint(control_successes, control_trials, alpha=alpha)
+    
+    # Calculate the sample proportions for the control and treatment groups
+    control_prop = control_successes / control_trials
+    treatment_prop = treatment_successes / treatment_trials
+
+    # Print the results for the control group
+    print('Control group:')
+    print('Sample estimate:', control_prop)
+    print('Z-statistic:', stat)
+    print('p-value:', pval)
+    print(f'{(1-alpha)*100:.0f}% Confidence interval:', (ci_low, ci_high))
+
+    # Perform the individual proportion test for the treatment group
+    stat, pval = proportions_ztest(count=treatment_successes, nobs=treatment_trials, value=hypo_prop)
+
+    # Calculate the confidence interval for the treatment group
+    ci_low, ci_high = proportion_confint(treatment_successes, treatment_trials, alpha=alpha)
+
+    # Print the results for the treatment group
+    print('\nTreatment group:')
+    print('Sample estimate:', treatment_prop)
+    print('Z-statistic:', stat)
+    print('p-value:', pval)
+    print(f'{(1-alpha)*100:.0f}% Confidence interval:', (ci_low, ci_high))
+```
+
+```{python include=FALSE}
+from statsmodels.stats.proportion import proportions_ztest, proportion_confint
+
+control_successes = 114
+control_trials = 500
+treatment_successes = 152
+treatment_trials = 500
+hypo_prop = 0.2
+alpha = 0.05
+
+def two_sample_prop_test(control_successes, control_trials, treatment_successes, treatment_trials, hypo_prop, alpha=0.05):
+    # Perform the individual proportion test for the control group
+    stat, pval = proportions_ztest(count=control_successes, nobs=control_trials, value=hypo_prop)
+
+    # Calculate the confidence interval for the control group
+    ci_low, ci_high = proportion_confint(control_successes, control_trials, alpha=alpha)
+    
+    # Calculate the sample proportions for the control and treatment groups
+    control_prop = control_successes / control_trials
+    treatment_prop = treatment_successes / treatment_trials
+
+    # Print the results for the control group
+    print('Control group:')
+    print('Sample estimate:', control_prop)
+    print('Z-statistic:', stat)
+    print('p-value:', pval)
+    print(f'{(1-alpha)*100:.0f}% Confidence interval:', (ci_low, ci_high))
+
+    # Perform the individual proportion test for the treatment group
+    stat, pval = proportions_ztest(count=treatment_successes, nobs=treatment_trials, value=hypo_prop)
+
+    # Calculate the confidence interval for the treatment group
+    ci_low, ci_high = proportion_confint(treatment_successes, treatment_trials, alpha=alpha)
+
+    # Print the results for the treatment group
+    print('\nTreatment group:')
+    print('Sample estimate:', treatment_prop)
+    print('Z-statistic:', stat)
+    print('p-value:', pval)
+    print(f'{(1-alpha)*100:.0f}% Confidence interval:', (ci_low, ci_high))
+```
+
+```{python include=FALSE}
+from statsmodels.stats.proportion import proportions_ztest, proportion_confint
+
+control_successes = 95
+control_trials = 500
+treatment_successes = 152
+treatment_trials = 500
+hypo_prop = 0.2
+alpha = 0.05
+
+def two_sample_prop_test(control_successes, control_trials, treatment_successes, treatment_trials, hypo_prop, alpha=0.05):
+    # Perform the individual proportion test for the control group
+    stat, pval = proportions_ztest(count=control_successes, nobs=control_trials, value=hypo_prop)
+
+    # Calculate the confidence interval for the control group
+    ci_low, ci_high = proportion_confint(control_successes, control_trials, alpha=alpha)
+    
+    # Calculate the sample proportions for the control and treatment groups
+    control_prop = control_successes / control_trials
+    treatment_prop = treatment_successes / treatment_trials
+
+    # Print the results for the control group
+    print('Control group:')
+    print('Sample estimate:', control_prop)
+    print('Z-statistic:', stat)
+    print('p-value:', pval)
+    print(f'{(1-alpha)*100:.0f}% Confidence interval:', (ci_low, ci_high))
+
+    # Perform the individual proportion test for the treatment group
+    stat, pval = proportions_ztest(count=treatment_successes, nobs=treatment_trials, value=hypo_prop)
+
+    # Calculate the confidence interval for the treatment group
+    ci_low, ci_high = proportion_confint(treatment_successes, treatment_trials, alpha=alpha)
+
+    # Print the results for the treatment group
+    print('\nTreatment group:')
+    print('Sample estimate:', treatment_prop)
+    print('Z-statistic:', stat)
+    print('p-value:', pval)
+    print(f'{(1-alpha)*100:.0f}% Confidence interval:', (ci_low, ci_high))
+```
+
+```{python echo=FALSE}
+from scipy.stats import norm
+
+# Define the hypothesized proportion for the control group
+hypo_prop = 0.2
+
+# Define the sample estimate and the confidence interval for the control group
+sample_estimate = 0.19
+ci_low = 0.1556
+ci_high = 0.2244
+
+# Define the x-axis range
+x = np.arange(0, 1, 0.01)
+
+# Define the normal distribution for the hypothesized proportion
+y1 = norm.pdf(x, hypo_prop, np.sqrt((hypo_prop * (1 - hypo_prop)) / 500))
+
+# Define the normal distribution for the sample estimate
+y2 = norm.pdf(x, sample_estimate, np.sqrt((sample_estimate * (1 - sample_estimate)) / 500))
+
+# Create the plot
+fig, ax = plt.subplots(figsize=(10, 5))
+
+# Plot the hypothesized proportion distribution
+ax.plot(x, y1, label='Hypothesized proportion', linestyle='--')
+
+# Plot the sample estimate distribution
+ax.plot(x, y2, label='Sample estimate')
+
+# Shade the area within the confidence interval
+ax.fill_between(x, norm.pdf(x, ci_low, np.sqrt((ci_low * (1 - ci_low)) / 500)), 
+                norm.pdf(x, ci_high, np.sqrt((ci_high * (1 - ci_high)) / 500)), 
+                alpha=0.2, label='95% CI')
+
+# Set the plot labels and legend
+ax.set_xlabel('Proportion')
+ax.set_ylabel('Density')
+ax.set_title('Normal Distribution of Sample Proportion')
+ax.legend()
+
+# Display the plot
+plt.show()
+```
+
+```{python include=FALSE}
+df_responded = df.query('responded == 1')
+control = df_responded.query("offer == 'control'").ticket.values
+drink = df_responded.query("offer == 'drink'").ticket.values
+food = df_responded.query("offer == 'food'").ticket.values
+```
+
+```{python include=FALSE}
+from scipy.stats import ttest_ind
+# Calculate the Welch's t-test between control and drink groups
+t, p = ttest_ind(control, drink, equal_var=False)
+
+# Print the results
+print("\n Welch's t-test between control and drink groups:")
+print(f"t-value: {t}")
+print(f"p-value: {p}")
+
+# Calculate the Welch's t-test between control and food groups
+t, p = ttest_ind(control, food, equal_var=False)
+
+# Print the results
+print("\n Welch's t-test between control and food groups:")
+print(f"t-value: {t}")
+print(f"p-value: {p}")
+
+# Calculate the Welch's t-test between drink and food groups
+t, p = ttest_ind(drink, food, equal_var=False)
+
+# Print the results
+print("\n Welch's t-test between drink and food groups:")
+print(f"t-value: {t}")
+print(f"p-value: {p}")
+```
+
+```{python include=FALSE}
+df_responded = df.query('responded == 1')
+control_concession = df_responded.query("offer == 'control'").concession.values
+drink_concession = df_responded.query("offer == 'drink'").concession.values
+food_concession = df_responded.query("offer == 'food'").concession.values
+```
+
+```{python include=FALSE}
+from scipy.stats import ttest_ind
+# Calculate the Welch's t-test between control and drink groups
+t, p = ttest_ind(control_concession, drink_concession, equal_var=False)
+
+# Print the results
+print("\n Welch's t-test between control and drink groups:")
+print(f"t-value: {t}")
+print(f"p-value: {p}")
+
+# Calculate the Welch's t-test between control and food groups
+t, p = ttest_ind(control_concession, food_concession, equal_var=False)
+
+# Print the results
+print("\n Welch's t-test between control and food groups:")
+print(f"t-value: {t}")
+print(f"p-value: {p}")
+
+# Calculate the Welch's t-test between drink and food groups
+t, p = ttest_ind(drink_concession, food_concession, equal_var=False)
+
+# Print the results
+print("\n Welch's t-test between drink and food groups:")
+print(f"t-value: {t}")
+print(f"p-value: {p}")
+```
+Based on the graph, we can see that the sample estimate falls below the hypothesized proportion, indicating that the actual response rate was lower than what was expected. However, the confidence interval overlaps with the hypothesized proportion, indicating that the difference between the expected and actual response rates may not be significant.Next, we analyzed the revenue generated from each treatment. We found that the control group had an average ticket revenue of $24.5 and an average concession revenue of $3.77. The drink offer had an average ticket revenue of $43 and an average concession revenue of $3.2. The food offer had an average ticket revenue of $42 and an average concession revenue of $2.4. From this data, it appears that the drink group had the highest ticket revenue, but the control offer had the highest concession revenue.
+
+To determine if these results were statistically significant, we performed Chi-square test which testify that there is a significant difference between the response rates of the treatment groups, so further we conducted the proportions test which showed results that there is no significant difference between the control and drink group but the treatment group that received food had a significantly higher response rate compared to both the control group and the group that received the drink. The Welch’s T-test showed that the difference between the three groups was statistically significant with food having a higher impact on the ticket revenue compared to the drink group and control.
+
+LIMITATION
+1.)	Selection Bias: The fans who were mailed the offer may not be representative of the entire fan base. It is possible that fans who were more likely to respond to a St. Patrick's Day promotion were more likely to be included in the sample. This could impact the generalization of the results to the larger fan base.
+2.)	Limited Information: The analysis only has information on which offer the fans received, whether they responded, and their revenue. There may be other factors, such as demographic information or previous purchasing behavior, that could provide additional insight into fan behavior and the effectiveness of the promotion.
+
+CERTAINITY OF THE ANALYSIS
+Confidence Intervals
+To assess the certainty of the analysis, we calculated the 95% confidence interval for the difference in means between the control and drink groups, the control and food groups, and the drink and food groups. The results showed that the confidence intervals for all three comparisons do not include zero and do not overlap, indicating that the differences are statistically significant at the 95% confidence level.
+
+CONCLUSION
+We can conclude through the analysis that the food treatment appears to be more effective than control and drink though there are certain limitations stated above and also analysis does not account for external factors like weather or competing events in the area that may have influenced the response rate and revenue.
